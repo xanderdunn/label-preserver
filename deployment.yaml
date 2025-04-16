@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-label-preserver
+  namespace: default
+  labels:
+    app: node-label-preserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: node-label-preserver
+  template:
+    metadata:
+      labels:
+        app: node-label-preserver
+    spec:
+      containers:
+        - name: node-label-preserver
+          image: node-label-preserver:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUST_LOG
+              value: "info,kube=warn"
