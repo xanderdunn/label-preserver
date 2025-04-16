@@ -154,14 +154,6 @@ async fn apply_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
 async fn cleanup_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
     let node_name = node.name_any();
     info!("Cleaning up node '{}' (Cleanup)", node_name);
-    if !node
-        .metadata
-        .finalizers
-        .as_ref()
-        .is_some_and(|f| f.contains(&FINALIZER_NAME.to_string()))
-    {
-        return Ok(Action::await_change());
-    }
     let labels_to_preserve = node.labels().clone();
     debug!(
         "Labels to preserve for node '{}': {:?}",
