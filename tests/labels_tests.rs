@@ -79,25 +79,6 @@ mod tests {
         Ok(())
     }
 
-    /// A convenience function for asserting that the node's label value is correct.
-    async fn assert_node_label_has_value(
-        client: Client,
-        node_name: &str,
-        key: &str,
-        value: Option<&String>,
-    ) {
-        let nodes: Api<Node> = Api::all(client.clone());
-        let node = nodes.get(node_name).await.unwrap();
-        assert_eq!(
-            node.metadata.labels.as_ref().unwrap().get(key),
-            value,
-            "Node has {} value {:?} but expected {:?}",
-            key,
-            node.metadata.labels.as_ref().unwrap().get(key),
-            value
-        );
-    }
-
     /// A convenience function to create a node by name.
     /// This does nothing if the node already exists.
     async fn create_node(client: Client, node_name: &str) -> Result<(), anyhow::Error> {
@@ -163,7 +144,7 @@ mod tests {
         set_node_labels(&client, node_name, &new_labels)
             .await
             .unwrap();
-        assert_node_label_has_value(client.clone(), node_name, key, Some(&value)).await;
+        wait_for_label_value(client.clone(), node_name, key, Some(&value)).await;
         Ok(value)
     }
 
@@ -182,6 +163,37 @@ mod tests {
                 panic!(
                     "Timeout waiting for node {} (should_exist: {})",
                     node_name, should_exist
+                );
+            }
+            tokio::time::sleep(interval).await;
+        }
+    }
+
+    async fn wait_for_label_value(
+        client: Client,
+        node_name: &str,
+        key: &str,
+        value: Option<&String>,
+    ) {
+        let nodes: Api<Node> = Api::all(client.clone());
+        let interval = std::time::Duration::from_millis(500);
+        let timeout = std::time::Duration::from_secs(10);
+        let start = std::time::Instant::now();
+        loop {
+            if let Ok(node) = nodes.get(node_name).await {
+                let current_value = node.metadata.labels.as_ref().and_then(|l| l.get(key));
+                if current_value == value {
+                    return;
+                }
+            }
+            if start.elapsed() > timeout {
+                let node = nodes.get(node_name).await.ok();
+                panic!(
+                    "Timeout waiting for node {} label {} to have value {:?}. Current: {:?}",
+                    node_name,
+                    key,
+                    value,
+                    node.and_then(|n| n.metadata.labels)
                 );
             }
             tokio::time::sleep(interval).await;
@@ -232,7 +244,7 @@ mod tests {
         //
         delete_node(client.clone(), &test_node_name).await.unwrap();
         create_node(client.clone(), &test_node_name).await.unwrap();
-        assert_node_label_has_value(
+        wait_for_label_value(
             client.clone(),
             &test_node_name,
             node_label_key,
@@ -266,7 +278,7 @@ mod tests {
         let node_label_value = set_random_label(client.clone(), &test_node_name, node_label_key)
             .await
             .unwrap();
-        assert_node_label_has_value(
+        wait_for_label_value(
             client.clone(),
             &test_node_name,
             node_label_key,
@@ -277,7 +289,7 @@ mod tests {
         let node_label_value2 = set_random_label(client.clone(), &test_node_name, node_label_key2)
             .await
             .unwrap();
-        assert_node_label_has_value(
+        wait_for_label_value(
             client.clone(),
             &test_node_name,
             node_label_key2,
@@ -323,7 +335,7 @@ mod tests {
             .any(|n| n.metadata.name == Some(test_node_name.to_string())));
 
         // Assert that the node has the new label value
-        assert_node_label_has_value(
+        wait_for_label_value(
             client.clone(),
             &test_node_name,
             node_label_key,
@@ -331,7 +343,7 @@ mod tests {
         )
         .await;
         // Assert that the other label was unaffected
-        assert_node_label_has_value(
+        wait_for_label_value(
             client.clone(),
             &test_node_name,
             node_label_key2,
@@ -339,7 +351,7 @@ mod tests {
         )
         .await;
         // Assert that the label created on the recreated node was unaffected
-        assert_node_label_has_value(
+        wait_for_label_value(
             client.clone(),
             &test_node_name,
             new_key,
@@ -385,7 +397,7 @@ mod tests {
         // 4. Add the node back to the cluster and assert that the label is restored
         //
         create_node(client.clone(), &test_node_name).await.unwrap();
-        assert_node_label_has_value(
+        wait_for_label_value(
             client.clone(),
             &test_node_name,
             node_label_key,
