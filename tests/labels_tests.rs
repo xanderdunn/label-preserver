@@ -167,6 +167,21 @@ mod tests {
         Ok(value)
     }
 
+    fn random_node_name(length: usize) -> String {
+        let name: String = rng()
+            .sample_iter(&Alphanumeric)
+            .take(length)
+            .map(char::from)
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        name
+    }
+
+    fn random_node_name_random_length() -> String {
+        let random_length: usize = rng().random_range(1..=253);
+        random_node_name(random_length)
+    }
+
     #[tokio::test]
     /// Test the following scenario:
     /// 1. Create a node
@@ -178,26 +193,26 @@ mod tests {
         //
         // 1. Create a node.
         //
-        let test_node_name = "node1";
-        create_node(client.clone(), test_node_name).await.unwrap();
+        let test_node_name = random_node_name(253);
+        create_node(client.clone(), &test_node_name).await.unwrap();
 
         //
         // 2. Add a label to the node
         //
         let node_label_key = "label.to.persist.com/test_slash";
-        let node_label_value = set_random_label(client.clone(), test_node_name, node_label_key)
+        let node_label_value = set_random_label(client.clone(), &test_node_name, node_label_key)
             .await
             .unwrap();
 
         //
         // 3. Delete the node, add the node back to the cluster, and assert that the label is restored
         //
-        delete_node(client.clone(), test_node_name).await.unwrap();
-        create_node(client.clone(), test_node_name).await.unwrap();
+        delete_node(client.clone(), &test_node_name).await.unwrap();
+        create_node(client.clone(), &test_node_name).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
         assert_node_label_has_value(
             client.clone(),
-            test_node_name,
+            &test_node_name,
             node_label_key,
             Some(&node_label_value),
         )
@@ -219,30 +234,30 @@ mod tests {
         //
         // 1. Create a node.
         //
-        let test_node_name = "node3";
-        create_node(client.clone(), test_node_name).await.unwrap();
+        let test_node_name = random_node_name_random_length();
+        create_node(client.clone(), &test_node_name).await.unwrap();
 
         //
         // 2. Add labels to the node
         //
         let node_label_key = "label_to_persist";
-        let node_label_value = set_random_label(client.clone(), test_node_name, node_label_key)
+        let node_label_value = set_random_label(client.clone(), &test_node_name, node_label_key)
             .await
             .unwrap();
         assert_node_label_has_value(
             client.clone(),
-            test_node_name,
+            &test_node_name,
             node_label_key,
             Some(&node_label_value.to_string()),
         )
         .await;
         let node_label_key2 = "label_to_persist2";
-        let node_label_value2 = set_random_label(client.clone(), test_node_name, node_label_key2)
+        let node_label_value2 = set_random_label(client.clone(), &test_node_name, node_label_key2)
             .await
             .unwrap();
         assert_node_label_has_value(
             client.clone(),
-            test_node_name,
+            &test_node_name,
             node_label_key2,
             Some(&node_label_value2.to_string()),
         )
@@ -251,7 +266,7 @@ mod tests {
         //
         // 3. Delete the node so that the label is stored
         //
-        delete_node(client.clone(), test_node_name).await.unwrap();
+        delete_node(client.clone(), &test_node_name).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         //
@@ -289,7 +304,7 @@ mod tests {
         // Assert that the node has the new label value
         assert_node_label_has_value(
             client.clone(),
-            test_node_name,
+            &test_node_name,
             node_label_key,
             Some(&new_label_value.to_string()),
         )
@@ -297,7 +312,7 @@ mod tests {
         // Assert that the other label was unaffected
         assert_node_label_has_value(
             client.clone(),
-            test_node_name,
+            &test_node_name,
             node_label_key2,
             Some(&node_label_value2.to_string()),
         )
@@ -305,7 +320,7 @@ mod tests {
         // Assert that the label created on the recreated node was unaffected
         assert_node_label_has_value(
             client.clone(),
-            test_node_name,
+            &test_node_name,
             new_key,
             Some(&new_key_value.to_string()),
         )
@@ -326,34 +341,34 @@ mod tests {
         //
         // 1. Create a node.
         //
-        let test_node_name = "node2";
-        create_node(client.clone(), test_node_name).await.unwrap();
+        let test_node_name = random_node_name(1);
+        create_node(client.clone(), &test_node_name).await.unwrap();
 
         //
         // 2. Add a label to the node
         //
         let node_label_key = "label_to_persist_deleting.12345";
-        let node_label_value = set_random_label(client.clone(), test_node_name, node_label_key)
+        let node_label_value = set_random_label(client.clone(), &test_node_name, node_label_key)
             .await
             .unwrap();
-        add_or_update_node_label(&client, test_node_name, node_label_key, &node_label_value)
+        add_or_update_node_label(&client, &test_node_name, node_label_key, &node_label_value)
             .await
             .unwrap();
 
         //
         // 3. Delete the node so that labels are stored
         //
-        delete_node(client.clone(), test_node_name).await.unwrap();
+        delete_node(client.clone(), &test_node_name).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         //
         // 4. Add the node back to the cluster and assert that the label is restored
         //
-        create_node(client.clone(), test_node_name).await.unwrap();
+        create_node(client.clone(), &test_node_name).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
         assert_node_label_has_value(
             client.clone(),
-            test_node_name,
+            &test_node_name,
             node_label_key,
             Some(&node_label_value),
         )
@@ -362,13 +377,13 @@ mod tests {
         //
         // 5. Delete the label on the node
         //
-        delete_node_label(&client, test_node_name, node_label_key)
+        delete_node_label(&client, &test_node_name, node_label_key)
             .await
             .unwrap();
         let nodes: Api<Node> = Api::all(client.clone());
         // The node should not have the key that was deleted
         let node_label_keys = nodes
-            .get(test_node_name)
+            .get(&test_node_name)
             .await
             .unwrap()
             .metadata
@@ -382,13 +397,13 @@ mod tests {
         //
         // 6. Cycle the node again and see that the label is not restored
         //
-        delete_node(client.clone(), test_node_name).await.unwrap();
+        delete_node(client.clone(), &test_node_name).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        create_node(client.clone(), test_node_name).await.unwrap();
+        create_node(client.clone(), &test_node_name).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
         // The node should not have the key that was deleted
         let node_label_keys = nodes
-            .get(test_node_name)
+            .get(&test_node_name)
             .await
             .unwrap()
             .metadata

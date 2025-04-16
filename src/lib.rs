@@ -12,6 +12,7 @@ use kube::{
     Client,
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -52,9 +53,15 @@ impl Context {
 }
 
 /// Generates the expected ConfigMap name for a given node name.
+/// We hash the node name to a fixed length to ensure our ConfigMap
+/// name is not longer than Kubernetes' key character limit.
 fn configmap_name(node_name: &str) -> String {
-    // Kubernetes names must be DNS-compatible
-    format!("node-labels-{}", node_name.replace('.', "-"))
+    let mut hasher = Sha256::new();
+    hasher.update(node_name.as_bytes());
+    let full_hash = hasher.finalize();
+    let hex_encoded_hash = hex::encode(full_hash);
+    // The resulting name ("node-labels-" + 64 hex chars)
+    format!("node-labels-{}", hex_encoded_hash)
 }
 
 /// Patch the ConfigMap flag to indicate labels have been applied
