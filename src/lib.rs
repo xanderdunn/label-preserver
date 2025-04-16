@@ -17,6 +17,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
+// TODO: Make these configurable
 pub const FINALIZER_NAME: &str = "nodelabelpreserver.example.com/finalizer";
 pub const CONFIGMAP_NAMESPACE: &str = "default";
 const SERVICE_NAME: &str = "node-label-preserver";

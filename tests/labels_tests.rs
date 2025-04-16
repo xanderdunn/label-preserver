@@ -121,7 +121,7 @@ mod tests {
         }
         let node = nodes.create(&PostParams::default(), &node).await?;
         assert_eq!(node.metadata.labels, None);
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        wait_for_node(client.clone(), node_name, true).await;
         // Check if the node was added
         let node_list = nodes.list(&Default::default()).await.unwrap();
         assert!(node_list
@@ -135,7 +135,7 @@ mod tests {
     async fn delete_node(client: Client, node_name: &str) -> Result<(), anyhow::Error> {
         let nodes: Api<Node> = Api::all(client.clone());
         nodes.delete(node_name, &Default::default()).await?;
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        wait_for_node(client.clone(), node_name, false).await;
         assert!(!nodes
             .list(&Default::default())
             .await
@@ -167,6 +167,28 @@ mod tests {
         Ok(value)
     }
 
+    // Poll until a node does or does not exist
+    async fn wait_for_node(client: Client, node_name: &str, should_exist: bool) {
+        let nodes: Api<Node> = Api::all(client);
+        let interval = std::time::Duration::from_millis(200);
+        let timeout = std::time::Duration::from_secs(10);
+        let start = std::time::Instant::now();
+        loop {
+            let exists = nodes.get(node_name).await.is_ok();
+            if exists == should_exist {
+                return;
+            }
+            if start.elapsed() > timeout {
+                panic!(
+                    "Timeout waiting for node {} (should_exist: {})",
+                    node_name, should_exist
+                );
+            }
+            tokio::time::sleep(interval).await;
+        }
+    }
+
+    /// Generate a random node name of a given length.
     fn random_node_name(length: usize) -> String {
         let name: String = rng()
             .sample_iter(&Alphanumeric)
@@ -177,6 +199,7 @@ mod tests {
         name
     }
 
+    /// Generate a random node name of a random length between min and max length.
     fn random_node_name_random_length() -> String {
         let random_length: usize = rng().random_range(1..=253);
         random_node_name(random_length)
@@ -209,7 +232,6 @@ mod tests {
         //
         delete_node(client.clone(), &test_node_name).await.unwrap();
         create_node(client.clone(), &test_node_name).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
         assert_node_label_has_value(
             client.clone(),
             &test_node_name,
@@ -267,7 +289,6 @@ mod tests {
         // 3. Delete the node so that the label is stored
         //
         delete_node(client.clone(), &test_node_name).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         //
         // 4. Add the node back to the cluster with a different label already set.
@@ -293,13 +314,13 @@ mod tests {
             ..Default::default()
         };
         nodes.create(&PostParams::default(), &node).await.unwrap();
+        wait_for_node(client.clone(), &test_node_name, true).await;
         // Check if the node was added
         let node_list = nodes.list(&Default::default()).await.unwrap();
         assert!(node_list
             .items
             .iter()
             .any(|n| n.metadata.name == Some(test_node_name.to_string())));
-        tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
 
         // Assert that the node has the new label value
         assert_node_label_has_value(
@@ -359,13 +380,11 @@ mod tests {
         // 3. Delete the node so that labels are stored
         //
         delete_node(client.clone(), &test_node_name).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         //
         // 4. Add the node back to the cluster and assert that the label is restored
         //
         create_node(client.clone(), &test_node_name).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
         assert_node_label_has_value(
             client.clone(),
             &test_node_name,
@@ -398,9 +417,7 @@ mod tests {
         // 6. Cycle the node again and see that the label is not restored
         //
         delete_node(client.clone(), &test_node_name).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         create_node(client.clone(), &test_node_name).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
         // The node should not have the key that was deleted
         let node_label_keys = nodes
             .get(&test_node_name)
