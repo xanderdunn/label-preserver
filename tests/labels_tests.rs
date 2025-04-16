@@ -148,7 +148,7 @@ mod tests {
         Ok(value)
     }
 
-    // Poll until a node does or does not exist
+    /// Poll until a node does or does not exist
     async fn wait_for_node(client: Client, node_name: &str, should_exist: bool) {
         let nodes: Api<Node> = Api::all(client);
         let interval = std::time::Duration::from_millis(200);
@@ -169,6 +169,7 @@ mod tests {
         }
     }
 
+    /// Poll until a node has a specific label value
     async fn wait_for_label_value(
         client: Client,
         node_name: &str,
@@ -200,6 +201,36 @@ mod tests {
         }
     }
 
+    /// Poll until a node has no labels
+    async fn wait_for_no_labels(client: Client, node_name: &str) {
+        let nodes: Api<Node> = Api::all(client);
+        let interval = std::time::Duration::from_millis(500); // Poll interval
+        let timeout = std::time::Duration::from_secs(20); // Timeout for controller action
+        let start = std::time::Instant::now();
+        loop {
+            match nodes.get(node_name).await {
+                Ok(node) => {
+                    if node.metadata.labels.as_ref().is_none() {
+                        return;
+                    }
+                }
+                Err(e) => {
+                    panic!("Asked to wait for no labels, but node not found: {}", e);
+                }
+            }
+            if start.elapsed() > timeout {
+                let node = nodes.get(node_name).await.ok(); // Get final state for logging
+                panic!(
+                    "Timeout waiting for node '{}' to have no labels after {}s. Final labels: {:?}",
+                    node_name,
+                    timeout.as_secs(),
+                    node.map(|node| node.metadata.labels.clone())
+                );
+            }
+            tokio::time::sleep(interval).await;
+        }
+    }
+
     /// Generate a random node name of a given length.
     fn random_node_name(length: usize) -> String {
         let name: String = rng()
@@ -217,11 +248,11 @@ mod tests {
         random_node_name(random_length)
     }
 
-    #[tokio::test]
     /// Test the following scenario:
     /// 1. Create a node
     /// 2. Add a label to the node
     /// 3. Delete the node, add the node back to the cluster and assert that the label is restored
+    #[tokio::test]
     async fn test_add_and_remove_node() {
         let client = Client::try_default().await.unwrap();
 
@@ -253,7 +284,6 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
     /// Test the following scenario:
     /// 1. Create a node
     /// 2. Add a label to the node
@@ -262,6 +292,7 @@ mod tests {
     ///    label is not overwritten.
     /// This is testing the edge case where labels are set on a node that is brought back to the
     /// cluster before the processor has time to restore labels.
+    #[tokio::test]
     async fn test_overwriting_labels() {
         let client = Client::try_default().await.unwrap();
 
@@ -360,13 +391,13 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
     /// 1. Create a node
     /// 2. Add a label to the node.
     /// 3. Delete the node so that the label is stored
     /// 4. Add the node back to the cluster and assert that the label is restored
     /// 5. Delete the label on the node
     /// 6. Cycle the node again and see that the label is not restored
+    #[tokio::test]
     async fn test_deleting_labels() {
         // Start from a clean slate
         let client = Client::try_default().await.unwrap();
@@ -442,5 +473,38 @@ mod tests {
             .map(|s| s.to_string())
             .collect::<Vec<String>>();
         assert!(!node_label_keys.contains(&node_label_key.to_string()));
+    }
+
+    /// Test the scenario where a node starts with no labels, is deleted,
+    /// and then recreated. It should still have no labels after recreation.
+    #[tokio::test]
+    async fn test_no_labels_cycle() {
+        let client = Client::try_default().await.unwrap();
+        let test_node_name = "node-no-labels-cycle-test"; // Unique name for this test
+
+        // Ensure clean slate before starting
+        let _ = delete_node(client.clone(), test_node_name).await;
+        wait_for_node(client.clone(), test_node_name, false).await; // Wait for deletion confirmation
+
+        // 1. Create a node. It should have no labels by default.
+        create_node(client.clone(), test_node_name).await.unwrap();
+        wait_for_node(client.clone(), test_node_name, true).await; // Wait for creation
+
+        // Assertion 1: Verify it initially has no labels
+        wait_for_no_labels(client.clone(), test_node_name).await;
+
+        // 2. Delete the node. Controller's cleanup_node should run.
+        //    It will create a ConfigMap storing no labels (only the flag).
+        delete_node(client.clone(), test_node_name).await.unwrap();
+        wait_for_node(client.clone(), test_node_name, false).await; // Wait for deletion
+
+        // 3. Recreate the node. Controller's apply_node should run.
+        //    It should read the ConfigMap, find no labels to restore, and do nothing to node labels.
+        create_node(client.clone(), test_node_name).await.unwrap();
+        wait_for_node(client.clone(), test_node_name, true).await; // Wait for recreation
+
+        // 4. Wait for the controller to potentially reconcile and verify the node still has no labels.
+        //    The wait ensures the controller has had a chance to act (or correctly do nothing).
+        wait_for_no_labels(client.clone(), test_node_name).await;
     }
 }
