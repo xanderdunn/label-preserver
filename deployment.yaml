@@ -22,3 +22,10 @@ spec:
           env:
             - name: RUST_LOG
               value: "info,kube=warn"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
