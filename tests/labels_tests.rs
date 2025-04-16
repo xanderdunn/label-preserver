@@ -231,6 +231,47 @@ mod tests {
         }
     }
 
+    /// Waits for a specific label key to be absent from a node's labels.
+    async fn wait_for_label_gone(client: Client, node_name: &str, label_key: &str) {
+        let nodes: Api<Node> = Api::all(client);
+        let interval = std::time::Duration::from_millis(500);
+        let timeout = std::time::Duration::from_secs(10);
+        let start = std::time::Instant::now();
+
+        loop {
+            match nodes.get(node_name).await {
+                Ok(node) => {
+                    if let Some(node_labels) = node.metadata.labels {
+                        if !node_labels.contains_key(label_key) {
+                            return;
+                        }
+                    } else {
+                        // If the node has no labels, we can consider the label gone
+                        return;
+                    }
+                }
+                Err(e) => {
+                    panic!(
+                        "Asked to wait for label to be gone, but node not found: {}",
+                        e
+                    );
+                }
+            }
+            if start.elapsed() > timeout {
+                let final_labels = nodes
+                    .get(node_name)
+                    .await
+                    .ok()
+                    .map(|n| n.metadata.labels.clone());
+                panic!(
+                    "Timeout waiting for label '{}' to be gone from node '{}' after {}s. Final labels: {:?}",
+                    label_key, node_name, timeout.as_secs(), final_labels
+                );
+            }
+            tokio::time::sleep(interval).await;
+        }
+    }
+
     /// Generate a random node name of a given length.
     fn random_node_name(length: usize) -> String {
         let name: String = rng()
@@ -442,19 +483,8 @@ mod tests {
         delete_node_label(&client, &test_node_name, node_label_key)
             .await
             .unwrap();
-        let nodes: Api<Node> = Api::all(client.clone());
         // The node should not have the key that was deleted
-        let node_label_keys = nodes
-            .get(&test_node_name)
-            .await
-            .unwrap()
-            .metadata
-            .labels
-            .unwrap_or_default()
-            .keys()
-            .map(|s| s.to_string())
-            .collect::<Vec<String>>();
-        assert!(!node_label_keys.contains(&node_label_key.to_string()));
+        wait_for_label_gone(client.clone(), &test_node_name, node_label_key).await;
 
         //
         // 6. Cycle the node again and see that the label is not restored
@@ -462,17 +492,7 @@ mod tests {
         delete_node(client.clone(), &test_node_name).await.unwrap();
         create_node(client.clone(), &test_node_name).await.unwrap();
         // The node should not have the key that was deleted
-        let node_label_keys = nodes
-            .get(&test_node_name)
-            .await
-            .unwrap()
-            .metadata
-            .labels
-            .unwrap_or_default()
-            .keys()
-            .map(|s| s.to_string())
-            .collect::<Vec<String>>();
-        assert!(!node_label_keys.contains(&node_label_key.to_string()));
+        wait_for_label_gone(client.clone(), &test_node_name, node_label_key).await;
     }
 
     /// Test the scenario where a node starts with no labels, is deleted,
