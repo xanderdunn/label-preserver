@@ -22,11 +22,11 @@ docker build -t $APP_NAME .
 
 kubectl apply -f deployment.yaml --force
 kubectl apply -f rbac.yaml
+kubectl rollout status deployment/$APP_NAME --timeout=60s
 kubectl get deployments
 kubectl describe deployment $APP_NAME
 kubectl describe pod
 kubectl get pods -l app=$APP_NAME
-# kubectl logs -f node-label-preserver
 # Wait for the pod to be ready
-sleep 3
+kubectl wait --for=condition=ready pod -l app=$APP_NAME --timeout=60s
 cargo test
