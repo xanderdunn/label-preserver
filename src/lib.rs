@@ -31,8 +31,6 @@ pub enum Error {
     Kube(#[from] kube::Error),
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
-    #[error("IllegalNodeOperation: Cannot run finalizer cleanup on node without finalizer")]
-    IllegalNodeOperation,
     #[error("Finalizer error: {0}")]
     Finalizer(String),
 }
