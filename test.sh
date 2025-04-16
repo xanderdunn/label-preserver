@@ -20,8 +20,9 @@ eval $(minikube -p minikube docker-env)
 # Build Docker image
 docker build -t $APP_NAME .
 
-kubectl apply -f deployment.yaml --force
+kubectl apply -f serviceaccount.yaml
 kubectl apply -f rbac.yaml
+kubectl apply -f deployment.yaml --force
 kubectl rollout status deployment/$APP_NAME --timeout=60s
 kubectl get deployments
 kubectl describe deployment $APP_NAME

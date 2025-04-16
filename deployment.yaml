@@ -15,6 +15,7 @@ spec:
       labels:
         app: node-label-preserver
     spec:
+      serviceAccountName: node-label-preserver-sa
       containers:
         - name: node-label-preserver
           image: node-label-preserver:latest
