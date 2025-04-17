@@ -26,7 +26,8 @@ pub const FINALIZER_NAME: &str = "nodelabelpreserver.example.com/finalizer";
 pub const CONFIGMAP_NAMESPACE: &str = "default";
 const SERVICE_NAME: &str = "node-label-preserver";
 const JSON_STORAGE_KEY: &str = "preserved_labels_json";
-const APPLIED_FLAG_KEY: &str = "labels_applied_flag";
+// 1 after annotations are restored, otherwise the key is missing from the Node
+const RESTORED_ANNOTATION_KEY: &str = "nodelabelpreserver.example.com/labels-restored";
 const REQUEUE_TIME: Duration = Duration::from_secs(10);
 const MAX_RETRY_TIME: Duration = Duration::from_secs(2);
 
@@ -70,19 +71,6 @@ fn configmap_name(node_name: &str) -> String {
     format!("node-labels-{}", hex_encoded_hash)
 }
 
-/// Patch the ConfigMap flag to indicate labels have been applied
-async fn update_cm_flag(cm_api: &Api<ConfigMap>, cm_name: &str) -> Result<(), Error> {
-    let cm_flag_patch = json!({"data": {APPLIED_FLAG_KEY: "1"}});
-    cm_api
-        .patch(
-            cm_name,
-            &PatchParams::default(),
-            &Patch::Merge(&cm_flag_patch),
-        )
-        .await?;
-    Ok(())
-}
-
 // Action to take on Node events
 pub async fn reconcile(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
     let node_name = node
@@ -109,24 +97,23 @@ pub async fn reconcile(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
 /// Handle Node Creation
 async fn apply_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
     let node_name = node.name_any();
+    if node.annotations().contains_key(RESTORED_ANNOTATION_KEY) {
+        return Ok(Action::await_change());
+    }
     info!("Reconciling node '{}' (Apply)", node_name);
 
     let node_api: Api<Node> = Api::all(ctx.client.clone());
     let mut current_labels = node.labels().clone();
     let mut labels_to_restore: BTreeMap<String, String> = BTreeMap::new();
-    let mut restoration_needed = false;
 
-    // Check ConfigMap for preserved labels and the applied flag
+    // Check ConfigMap for preserved labels
     let cm_name = configmap_name(&node_name);
     match ctx.cm_api.get(&cm_name).await {
         Ok(cm) => {
             if let Some(data) = &cm.data {
-                if data.get(APPLIED_FLAG_KEY).map(|s| s.as_str()) == Some("0") {
-                    restoration_needed = true;
-                    if let Some(labels_json_str) = data.get(JSON_STORAGE_KEY) {
-                        labels_to_restore =
-                            serde_json::from_str(labels_json_str).map_err(Error::Serialization)?;
-                    }
+                if let Some(labels_json_str) = data.get(JSON_STORAGE_KEY) {
+                    labels_to_restore =
+                        serde_json::from_str(labels_json_str).map_err(Error::Serialization)?;
                 }
             }
         }
@@ -136,10 +123,11 @@ async fn apply_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
 
     // Apply labels if restoration is needed and labels differ
     let mut needs_node_patch = false;
-    if restoration_needed && !labels_to_restore.is_empty() {
+    if !labels_to_restore.is_empty() {
         for (key, value) in labels_to_restore {
-            if let std::collections::btree_map::Entry::Vacant(e) = current_labels.entry(key) {
-                e.insert(value);
+            // Merge strategy: only apply if key is not already present
+            if let std::collections::btree_map::Entry::Vacant(entry) = current_labels.entry(key) {
+                entry.insert(value);
                 needs_node_patch = true;
             }
         }
@@ -147,17 +135,30 @@ async fn apply_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
 
     // Patch Node if necessary
     if needs_node_patch {
-        let node_patch = json!({"metadata": {"labels": current_labels}});
+        let patch_payload = json!({
+            "metadata": {
+                "labels": current_labels,
+                "annotations": {
+                    RESTORED_ANNOTATION_KEY: "1"
+                }
+            }
+        });
         node_api
             .patch(
                 &node_name,
                 &PatchParams::default(),
-                &Patch::Merge(&node_patch),
+                &Patch::Merge(&patch_payload),
             )
             .await?;
-        update_cm_flag(&ctx.cm_api, &cm_name).await?;
-    } else if restoration_needed {
-        update_cm_flag(&ctx.cm_api, &cm_name).await?;
+    } else {
+        let patch_payload = json!({"metadata": {"annotations": {RESTORED_ANNOTATION_KEY: "1"}}});
+        node_api
+            .patch(
+                &node_name,
+                &PatchParams::default(),
+                &Patch::Merge(&patch_payload),
+            )
+            .await?;
     }
 
     Ok(Action::await_change())
@@ -172,6 +173,7 @@ async fn cleanup_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
     // This check is to prevent our finalizer from indefinitely preventing a resource from
     // being deleted if our cleanup is failing in a loop.
     if let Some(Time(deletion_time)) = node.metadata.deletion_timestamp {
+        // FIXME: Deal with clock skew
         let current_time = SystemTime::now();
         let deletion_system_time: SystemTime = deletion_time.into();
         if current_time
@@ -197,14 +199,14 @@ async fn cleanup_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
     let cm_name = configmap_name(&node_name);
     let mut cm_data = BTreeMap::new();
 
-    // Always set the applied flag to "0" during cleanup
-    cm_data.insert(APPLIED_FLAG_KEY.to_string(), "0".to_string());
     if !labels_to_preserve.is_empty() {
         let labels_json =
             serde_json::to_string(&labels_to_preserve).map_err(Error::Serialization)?;
         cm_data.insert(JSON_STORAGE_KEY.to_string(), labels_json);
     }
-
+    // We write a ConfigMap with no data when there are no label to preserve
+    // because otherwise we may keep around outdated labels from a previous
+    // node deletion.
     let cm = ConfigMap {
         metadata: ObjectMeta {
             name: Some(cm_name.clone()),
@@ -221,6 +223,7 @@ async fn cleanup_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
         .patch(&cm_name, &patch_params, &Patch::Apply(&cm))
         .await
         .map_err(Error::Kube)?;
+
     Ok(Action::await_change())
 }
 

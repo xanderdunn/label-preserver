@@ -22,7 +22,7 @@ Write a service that will preserve Nodes’ labels if they are deleted from the 
 - `cargo test test_add_and_remove_node`
 
 ## Further Work
-- High availability: Use leader election on the Controller to allow multiple replicas of the controller to run in parallel without conflict
+- High availability: Use leader election on the Controller to allow multiple replicas of the controller to run in parallel without duplicating work
 - Horizontal scaling: Give each replica a disjoint subset of objects to watch: namespace‑by‑namespace, a label/field selector, or a hash‑mod shard.
     - This is likely unnecessary based on expected workload?
 - Add a liveness/readiness probe
