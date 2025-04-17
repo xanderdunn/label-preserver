@@ -1,6 +1,6 @@
 use k8s_openapi::{
     api::core::v1::{ConfigMap, Node},
-    apimachinery::pkg::apis::meta::v1::ObjectMeta,
+    apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time},
 };
 use kube::{
     api::{Api, Patch, PatchParams, ResourceExt},
@@ -13,7 +13,11 @@ use kube::{
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
@@ -24,6 +28,7 @@ const SERVICE_NAME: &str = "node-label-preserver";
 const JSON_STORAGE_KEY: &str = "preserved_labels_json";
 const APPLIED_FLAG_KEY: &str = "labels_applied_flag";
 const REQUEUE_TIME: Duration = Duration::from_secs(10);
+const MAX_RETRY_TIME: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -162,6 +167,27 @@ async fn apply_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
 async fn cleanup_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
     let node_name = node.name_any();
     info!("Cleaning up node '{}' (Cleanup)", node_name);
+
+    // Check if deletion has been pending for too long.
+    // This check is to prevent our finalizer from indefinitely preventing a resource from
+    // being deleted if our cleanup is failing in a loop.
+    if let Some(Time(deletion_time)) = node.metadata.deletion_timestamp {
+        let current_time = SystemTime::now();
+        let deletion_system_time: SystemTime = deletion_time.into();
+        if current_time
+            .duration_since(deletion_system_time)
+            .unwrap_or_default()
+            > MAX_RETRY_TIME
+        {
+            warn!(
+                "Node '{}' termination cleanup failed for over {}. Forcing finalizer removal.",
+                node_name,
+                MAX_RETRY_TIME.as_secs()
+            );
+            return Ok(Action::await_change());
+        }
+    }
+
     let labels_to_preserve = node.labels().clone();
     debug!(
         "Labels to preserve for node '{}': {:?}",

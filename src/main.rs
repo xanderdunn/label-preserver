@@ -5,7 +5,7 @@ use kube::{
     runtime::{controller::Controller, watcher},
     Client,
 };
-use label_preserver::{error_policy, reconcile, Context, CONFIGMAP_NAMESPACE, FINALIZER_NAME};
+use label_preserver::{error_policy, reconcile, Context, CONFIGMAP_NAMESPACE};
 use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::prelude::*;
@@ -20,16 +20,10 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let client = Client::try_default().await?;
-    info!("Kubernetes client initialized successfully.");
-
     let node_api: Api<Node> = Api::all(client.clone());
     let context = Arc::new(Context::new(client.clone()));
-
-    info!("Starting Node Label Preserver controller...");
-    info!("Watching Nodes cluster-wide.");
-    info!("Using finalizer: {}", FINALIZER_NAME);
     info!(
-        "Storing label backups in ConfigMaps within namespace: {}",
+        "Starting Node Label Preserver controller, storing in namespace {}...",
         CONFIGMAP_NAMESPACE
     );
 
@@ -42,7 +36,5 @@ async fn main() -> anyhow::Result<()> {
             }
         })
         .await;
-
-    info!("Controller finished.");
     Ok(())
 }
