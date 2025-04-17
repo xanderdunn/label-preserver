@@ -29,6 +29,7 @@ Write a service that will preserve Nodes’ labels if they are deleted from the 
 - Make the merge strategy (overwrite / don't overwrite) configurable
 - Garbage collect old ConfigMaps
 - Batch or rate limit via the Controller's queue - spiky workloads
+- Add metrics: number of nodes reconciled, labels restored, cleanup operations, errors encountered, ConfigMaps created/managed, reconciliation latency, etc.
 - Add test cases
     - Simulate Controller crashes
     - Add a test that does a mass delete of 5,000 nodes

@@ -229,7 +229,7 @@ mod tests {
                     "Timeout waiting for node '{}' to have no labels after {}s. Final labels: {:?}",
                     node_name,
                     timeout.as_secs(),
-                    node.map(|node| node.metadata.labels.clone())
+                    node.and_then(|n| n.metadata.labels)
                 );
             }
             tokio::time::sleep(interval).await;
@@ -528,7 +528,7 @@ mod tests {
             .unwrap();
 
         // 2. Delete the node. Controller's cleanup_node should run.
-        //    It will create a ConfigMap storing no labels (only the flag).
+        //    It will create a ConfigMap storing no labels
         delete_node(client.clone(), test_node_name).await.unwrap();
         wait_for_node(client.clone(), test_node_name, false)
             .await
