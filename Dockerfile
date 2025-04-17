@@ -4,6 +4,9 @@ FROM rust:1-slim AS builder
 RUN apt-get update && \
     apt-get install -y pkg-config openssl libssl-dev
 
+RUN groupadd --system nonroot && useradd --system --gid nonroot nonroot
+USER nonroot:nonroot
+
 WORKDIR /usr/local/label-preserver
 COPY ./Cargo.toml ./Cargo.toml
 COPY ./src ./src
