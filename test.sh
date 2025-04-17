@@ -3,7 +3,7 @@
 APP_NAME="node-label-preserver"
 
 # Kill the pod on exit
-trap "kubectl delete deployment ${APP_NAME} && kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep ${APP_NAME} | xargs -I {} kubectl delete pod {} --grace-period=0 --force --wait=true" EXIT
+trap "kubectl delete deployment ${APP_NAME} && kubectl get pods --no-headers -o custom-columns=\":metadata.name\" | grep ${APP_NAME} | xargs -I {} kubectl delete pod {} --grace-period=0 --force --wait=true" EXIT
 
 set -e
 
