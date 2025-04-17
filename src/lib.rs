@@ -11,7 +11,6 @@ use kube::{
     },
     Client,
 };
-use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -121,45 +120,34 @@ async fn apply_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
         Err(e) => return Err(Error::Kube(e)),
     }
 
-    // Apply labels if restoration is needed and labels differ
-    let mut needs_node_patch = false;
+    // Apply labels if they differ
     if !labels_to_restore.is_empty() {
         for (key, value) in labels_to_restore {
             // Merge strategy: only apply if key is not already present
             if let std::collections::btree_map::Entry::Vacant(entry) = current_labels.entry(key) {
                 entry.insert(value);
-                needs_node_patch = true;
             }
         }
     }
 
-    // Patch Node if necessary
-    if needs_node_patch {
-        let patch_payload = json!({
-            "metadata": {
-                "labels": current_labels,
-                "annotations": {
-                    RESTORED_ANNOTATION_KEY: "1"
-                }
-            }
-        });
-        node_api
-            .patch(
-                &node_name,
-                &PatchParams::default(),
-                &Patch::Merge(&patch_payload),
-            )
-            .await?;
-    } else {
-        let patch_payload = json!({"metadata": {"annotations": {RESTORED_ANNOTATION_KEY: "1"}}});
-        node_api
-            .patch(
-                &node_name,
-                &PatchParams::default(),
-                &Patch::Merge(&patch_payload),
-            )
-            .await?;
-    }
+    // Patch node
+    let mut annotations_to_apply = BTreeMap::new();
+    annotations_to_apply.insert(RESTORED_ANNOTATION_KEY.to_string(), "1".to_string());
+    let apply_payload = Node {
+        metadata: ObjectMeta {
+            name: Some(node_name.clone()),
+            labels: Some(current_labels),
+            annotations: Some(annotations_to_apply),
+            ..Default::default()
+        },
+        spec: None,
+        status: None,
+    };
+    let patch_params = PatchParams::apply(SERVICE_NAME).force();
+    node_api
+        .patch(&node_name, &patch_params, &Patch::Apply(&apply_payload))
+        .await
+        .map_err(Error::Kube)?;
 
     Ok(Action::await_change())
 }
