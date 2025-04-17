@@ -102,9 +102,9 @@ mod tests {
         }
         let node = nodes.create(&PostParams::default(), &node).await?;
         assert_eq!(node.metadata.labels, None);
-        wait_for_node(client.clone(), node_name, true).await;
+        wait_for_node(client.clone(), node_name, true).await?;
         // Check if the node was added
-        let node_list = nodes.list(&Default::default()).await.unwrap();
+        let node_list = nodes.list(&Default::default()).await?;
         assert!(node_list
             .items
             .iter()
@@ -116,7 +116,7 @@ mod tests {
     async fn delete_node(client: Client, node_name: &str) -> Result<(), anyhow::Error> {
         let nodes: Api<Node> = Api::all(client.clone());
         nodes.delete(node_name, &Default::default()).await?;
-        wait_for_node(client.clone(), node_name, false).await;
+        wait_for_node(client.clone(), node_name, false).await?;
         assert!(!nodes
             .list(&Default::default())
             .await
@@ -144,12 +144,16 @@ mod tests {
         set_node_labels(&client, node_name, &new_labels)
             .await
             .unwrap();
-        wait_for_label_value(client.clone(), node_name, key, Some(&value)).await;
+        wait_for_label_value(client.clone(), node_name, key, Some(&value)).await?;
         Ok(value)
     }
 
     /// Poll until a node does or does not exist
-    async fn wait_for_node(client: Client, node_name: &str, should_exist: bool) {
+    async fn wait_for_node(
+        client: Client,
+        node_name: &str,
+        should_exist: bool,
+    ) -> Result<(), anyhow::Error> {
         let nodes: Api<Node> = Api::all(client);
         let interval = std::time::Duration::from_millis(200);
         let timeout = std::time::Duration::from_secs(10);
@@ -157,12 +161,13 @@ mod tests {
         loop {
             let exists = nodes.get(node_name).await.is_ok();
             if exists == should_exist {
-                return;
+                return Ok(());
             }
             if start.elapsed() > timeout {
-                panic!(
+                anyhow::bail!(
                     "Timeout waiting for node {} (should_exist: {})",
-                    node_name, should_exist
+                    node_name,
+                    should_exist
                 );
             }
             tokio::time::sleep(interval).await;
@@ -175,7 +180,7 @@ mod tests {
         node_name: &str,
         key: &str,
         value: Option<&String>,
-    ) {
+    ) -> Result<(), anyhow::Error> {
         let nodes: Api<Node> = Api::all(client.clone());
         let interval = std::time::Duration::from_millis(500);
         let timeout = std::time::Duration::from_secs(10);
@@ -184,12 +189,12 @@ mod tests {
             if let Ok(node) = nodes.get(node_name).await {
                 let current_value = node.metadata.labels.as_ref().and_then(|l| l.get(key));
                 if current_value == value {
-                    return;
+                    return Ok(());
                 }
             }
             if start.elapsed() > timeout {
                 let node = nodes.get(node_name).await.ok();
-                panic!(
+                anyhow::bail!(
                     "Timeout waiting for node {} label {} to have value {:?}. Current: {:?}",
                     node_name,
                     key,
@@ -202,20 +207,20 @@ mod tests {
     }
 
     /// Poll until a node has no labels
-    async fn wait_for_no_labels(client: Client, node_name: &str) {
+    async fn wait_for_no_labels(client: Client, node_name: &str) -> Result<(), anyhow::Error> {
         let nodes: Api<Node> = Api::all(client);
-        let interval = std::time::Duration::from_millis(500); // Poll interval
-        let timeout = std::time::Duration::from_secs(20); // Timeout for controller action
+        let interval = std::time::Duration::from_millis(500);
+        let timeout = std::time::Duration::from_secs(20);
         let start = std::time::Instant::now();
         loop {
             match nodes.get(node_name).await {
                 Ok(node) => {
                     if node.metadata.labels.as_ref().is_none() {
-                        return;
+                        return Ok(());
                     }
                 }
                 Err(e) => {
-                    panic!("Asked to wait for no labels, but node not found: {}", e);
+                    anyhow::bail!("Asked to wait for no labels, but node not found: {}", e);
                 }
             }
             if start.elapsed() > timeout {
@@ -322,7 +327,8 @@ mod tests {
             node_label_key,
             Some(&node_label_value),
         )
-        .await;
+        .await
+        .unwrap();
     }
 
     /// Test the following scenario:
@@ -356,7 +362,8 @@ mod tests {
             node_label_key,
             Some(&node_label_value.to_string()),
         )
-        .await;
+        .await
+        .unwrap();
         let node_label_key2 = "label_to_persist2";
         let node_label_value2 = set_random_label(client.clone(), &test_node_name, node_label_key2)
             .await
@@ -367,7 +374,8 @@ mod tests {
             node_label_key2,
             Some(&node_label_value2.to_string()),
         )
-        .await;
+        .await
+        .unwrap();
 
         //
         // 3. Delete the node so that the label is stored
@@ -398,7 +406,9 @@ mod tests {
             ..Default::default()
         };
         nodes.create(&PostParams::default(), &node).await.unwrap();
-        wait_for_node(client.clone(), &test_node_name, true).await;
+        wait_for_node(client.clone(), &test_node_name, true)
+            .await
+            .unwrap();
         // Check if the node was added
         let node_list = nodes.list(&Default::default()).await.unwrap();
         assert!(node_list
@@ -413,7 +423,8 @@ mod tests {
             node_label_key,
             Some(&new_label_value.to_string()),
         )
-        .await;
+        .await
+        .unwrap();
         // Assert that the other label was unaffected
         wait_for_label_value(
             client.clone(),
@@ -421,7 +432,8 @@ mod tests {
             node_label_key2,
             Some(&node_label_value2.to_string()),
         )
-        .await;
+        .await
+        .unwrap();
         // Assert that the label created on the recreated node was unaffected
         wait_for_label_value(
             client.clone(),
@@ -429,7 +441,8 @@ mod tests {
             new_key,
             Some(&new_key_value.to_string()),
         )
-        .await;
+        .await
+        .unwrap();
     }
 
     /// 1. Create a node
@@ -475,7 +488,8 @@ mod tests {
             node_label_key,
             Some(&node_label_value),
         )
-        .await;
+        .await
+        .unwrap();
 
         //
         // 5. Delete the label on the node
@@ -502,29 +516,35 @@ mod tests {
         let client = Client::try_default().await.unwrap();
         let test_node_name = "node-no-labels-cycle-test"; // Unique name for this test
 
-        // Ensure clean slate before starting
-        let _ = delete_node(client.clone(), test_node_name).await;
-        wait_for_node(client.clone(), test_node_name, false).await; // Wait for deletion confirmation
-
         // 1. Create a node. It should have no labels by default.
         create_node(client.clone(), test_node_name).await.unwrap();
-        wait_for_node(client.clone(), test_node_name, true).await; // Wait for creation
+        wait_for_node(client.clone(), test_node_name, true)
+            .await
+            .unwrap();
 
         // Assertion 1: Verify it initially has no labels
-        wait_for_no_labels(client.clone(), test_node_name).await;
+        wait_for_no_labels(client.clone(), test_node_name)
+            .await
+            .unwrap();
 
         // 2. Delete the node. Controller's cleanup_node should run.
         //    It will create a ConfigMap storing no labels (only the flag).
         delete_node(client.clone(), test_node_name).await.unwrap();
-        wait_for_node(client.clone(), test_node_name, false).await; // Wait for deletion
+        wait_for_node(client.clone(), test_node_name, false)
+            .await
+            .unwrap();
 
         // 3. Recreate the node. Controller's apply_node should run.
         //    It should read the ConfigMap, find no labels to restore, and do nothing to node labels.
         create_node(client.clone(), test_node_name).await.unwrap();
-        wait_for_node(client.clone(), test_node_name, true).await; // Wait for recreation
+        wait_for_node(client.clone(), test_node_name, true)
+            .await
+            .unwrap();
 
         // 4. Wait for the controller to potentially reconcile and verify the node still has no labels.
         //    The wait ensures the controller has had a chance to act (or correctly do nothing).
-        wait_for_no_labels(client.clone(), test_node_name).await;
+        wait_for_no_labels(client.clone(), test_node_name)
+            .await
+            .unwrap();
     }
 }
