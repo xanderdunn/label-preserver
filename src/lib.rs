@@ -22,14 +22,14 @@ use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
 // TODO: Make these configurable
-pub const FINALIZER_NAME: &str = "nodelabelpreserver.example.com/finalizer";
 pub const CONFIGMAP_NAMESPACE: &str = "default";
+const FINALIZER_NAME: &str = "nodelabelpreserver.example.com/finalizer";
 const SERVICE_NAME: &str = "node-label-preserver";
 const JSON_STORAGE_KEY: &str = "preserved_labels_json";
-// 1 after annotations are restored, otherwise the key is missing from the Node
+/// 1 after annotations are restored, otherwise the key is missing from the Node
 const RESTORED_ANNOTATION_KEY: &str = "nodelabelpreserver.example.com/labels-restored";
 const REQUEUE_TIME: Duration = Duration::from_secs(10);
-const MAX_RETRY_TIME: Duration = Duration::from_secs(2);
+const MAX_RETRY_TIME: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -173,7 +173,6 @@ async fn cleanup_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
     // This check is to prevent our finalizer from indefinitely preventing a resource from
     // being deleted if our cleanup is failing in a loop.
     if let Some(Time(deletion_time)) = node.metadata.deletion_timestamp {
-        // FIXME: Deal with clock skew
         let current_time = SystemTime::now();
         let deletion_system_time: SystemTime = deletion_time.into();
         if current_time
