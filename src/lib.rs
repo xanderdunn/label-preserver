@@ -14,7 +14,10 @@ use kube::{
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
     time::{Duration, SystemTime},
 };
 use thiserror::Error;
@@ -27,7 +30,7 @@ const SERVICE_NAME: &str = "node-label-preserver";
 const JSON_STORAGE_KEY: &str = "preserved_labels_json";
 /// 1 after annotations are restored, otherwise the key is missing from the Node
 const RESTORED_ANNOTATION_KEY: &str = "nodelabelpreserver.example.com/labels-restored";
-const REQUEUE_TIME: Duration = Duration::from_secs(10);
+const REQUEUE_TIME: Duration = Duration::from_secs(2);
 const MAX_RETRY_TIME: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, Error)]
@@ -48,13 +51,18 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub struct Context {
     client: Client,
     cm_api: Api<ConfigMap>,
+    attempt: AtomicU32,
 }
 
 impl Context {
     /// Create a new Context
     pub fn new(client: Client) -> Self {
         let cm_api = Api::<ConfigMap>::namespaced(client.clone(), CONFIGMAP_NAMESPACE);
-        Self { client, cm_api }
+        Self {
+            client,
+            cm_api,
+            attempt: AtomicU32::new(0),
+        }
     }
 }
 
@@ -214,8 +222,14 @@ async fn cleanup_node(node: Arc<Node>, ctx: Arc<Context>) -> Result<Action> {
     Ok(Action::await_change())
 }
 
-/// Error policy determines action on reconciliation failure
-pub fn error_policy(_node: Arc<Node>, error: &Error, _ctx: Arc<Context>) -> Action {
+/// Exponential backoff on error
+pub fn error_policy(_node: Arc<Node>, error: &Error, ctx: Arc<Context>) -> Action {
     error!("Reconciliation failed: {:?}", error);
-    Action::requeue(REQUEUE_TIME)
+    let attempt = ctx.attempt.fetch_add(1, Ordering::SeqCst) + 1;
+    let base_secs = REQUEUE_TIME.as_secs();
+    let max_secs = MAX_RETRY_TIME.as_secs();
+    // 2**attempt
+    let factor = 2u64.checked_pow(attempt).unwrap_or(u64::MAX);
+    let delay_s = base_secs.saturating_mul(factor).min(max_secs);
+    Action::requeue(Duration::from_secs(delay_s))
 }
