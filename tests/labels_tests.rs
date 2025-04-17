@@ -215,7 +215,9 @@ mod tests {
         loop {
             match nodes.get(node_name).await {
                 Ok(node) => {
-                    if node.metadata.labels.as_ref().is_none() {
+                    if node.metadata.labels.as_ref().is_none()
+                        || node.metadata.labels.unwrap().is_empty()
+                    {
                         return Ok(());
                     }
                 }
@@ -279,13 +281,13 @@ mod tests {
 
     /// Generate a random node name of a given length.
     fn random_node_name(length: usize) -> String {
-        let name: String = rng()
+        assert!(length >= 1, "node name length must be ≥ 1");
+        rng()
             .sample_iter(&Alphanumeric)
             .take(length)
             .map(char::from)
             .map(|c| c.to_ascii_lowercase())
-            .collect();
-        name
+            .collect()
     }
 
     /// Generate a random node name of a random length between min and max length.
@@ -338,7 +340,7 @@ mod tests {
     /// 4. Add the node back to the cluster with a different label already set. Assert that the new
     ///    label is not overwritten.
     /// This is testing the edge case where labels are set on a node that is brought back to the
-    /// cluster before the processor has time to restore labels.
+    /// cluster before the controller has time to restore labels.
     #[tokio::test]
     async fn test_overwriting_labels() {
         let client = Client::try_default().await.unwrap();
